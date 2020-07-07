@@ -58,8 +58,7 @@
                                        (cons "target" (object-id (car successors)))
                                        (cons "target_label" (write-to-string i)))
                            :classes (list "successor"))
-            elements)
-      (setq elements (nconc elements (make-edges (car successors)))))
+            elements))
 
     (do ((inputs (cleavir-ir:inputs object) (cdr inputs))
          (i 0 (1+ i)))
@@ -70,8 +69,7 @@
                                        (cons "target" (object-id object))
                                        (cons "target_label" (cleavir-ir-graphviz:input-label object (car inputs) i)))
                            :classes (list "input"))
-            elements)
-      (setq elements (nconc elements (make-edges (car inputs)))))
+            elements))
 
     (do ((outputs (cleavir-ir:outputs object) (cdr outputs))
          (i 0 (1+ i)))
@@ -82,19 +80,18 @@
                                        (cons "target" (object-id (car outputs)))
                                        (cons "source_label" (cleavir-ir-graphviz:output-label object (car outputs) i)))
                            :classes (list "output"))
-            elements)
-      (setq elements (nconc elements (make-edges (car outputs)))))
+            elements))
 
     elements))
 
 
 (defmethod make-edges ((object cleavir-ir:enclose-instruction))
-  (cons (make-instance 'cytoscape:element
-                       :group "edges"
-                       :data (list (cons "source" (object-id (cleavir-ir:code object)))
-                                   (cons "target" (object-id object)))
-                       :classes (list "code"))
-        (call-next-method)))
+  (append (list (make-instance 'cytoscape:element
+                               :group "edges"
+                               :data (list (cons "source" (object-id (cleavir-ir:code object)))
+                                           (cons "target" (object-id object)))
+                               :classes (list "code")))
+          (call-next-method)))
 
 
 (defmethod make-edges ((object cleavir-ir:unwind-instruction))
@@ -106,13 +103,13 @@
         (call-next-method)))
 
 
-(defun hir-graph (hir)
+(defun hir-graph (initial-instruction)
   (let* ((*object-ids* (make-hash-table :test #'eq))
-         (elements (make-edges hir)))
+         elements)
     (push (make-instance 'cytoscape:element
                          :group "edges"
                          :data (list (cons "source" "start")
-                                     (cons "target" (object-id hir)))
+                                     (cons "target" (object-id initial-instruction)))
                          :classes (list "start"))
           elements)
     (push (make-instance 'cytoscape:element
@@ -121,11 +118,15 @@
                                      (cons "label" "START"))
                          :classes (list "start"))
           elements)
+    (cleavir-ir:map-instructions-arbitrary-order
+      (lambda (instruction)
+        (setq elements (nconc elements (make-edges instruction))))
+      initial-instruction)
     (maphash (lambda (object id)
                (push (make-node object) elements))
              *object-ids*)
     (make-instance 'cytoscape:cytoscape-widget
-                   :graph-layouts (list (make-instance 'cytoscape:dagre-layout)); :roots roots))
+                   :graph-layouts (list (make-instance 'cytoscape:dagre-layout))
                    :graph-style *graph-style*
                    :elements elements
                    :layout (make-instance 'jupyter-widgets:layout :width "auto" :height "2000px"))))
