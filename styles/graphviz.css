@@ -43,24 +43,24 @@ edge {
   target-arrow-color: blue;
 }
 
+.datum {
+  shape: round-rectangle;
+}
+
 .constant-input {
   background-color: green;
-  shape: round-rectangle;
 }
 
 .lexical-location {
   background-color: yellow;
-  shape: round-rectangle;
 }
 
 .values-location {
   background-color: blue;
-  shape: round-rectangle;
 }
 
 .immediate-input {
   background-color: aquamarine;
-  shape: round-rectangle;
 }
 
 .load-time-value-input {

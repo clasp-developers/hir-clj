@@ -7,6 +7,7 @@
     :author "Christian Schafmeister <>"
     :licence "LGPL-2.0"
   :depends-on (
+    :closer-mop
     :cytoscape-clj)
     :serial t
     :components

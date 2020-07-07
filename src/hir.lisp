@@ -11,13 +11,17 @@
 
 (defparameter *graph-style* nil)
 
+
 (defun set-graph-style (name)
   (setq *graph-style* (alexandria:read-file-into-string (asdf:component-pathname (asdf:find-component :hir-clj (list "styles" (format nil "~A.css" name))))))
   (values))
 
+
 (set-graph-style "graphviz")
 
+
 (defgeneric make-node (object))
+
 
 (defgeneric make-edges (object))
 
@@ -25,26 +29,41 @@
 (defmethod cleavir-ir-graphviz:label ((object cleavir-ir:constant-input))
   (cleavir-ir:value object))
 
+
 (defmethod cleavir-ir-graphviz:label ((object cleavir-ir:lexical-location))
   (cleavir-ir:name object))
+
 
 (defmethod cleavir-ir-graphviz:label ((object cleavir-ir:values-location))
   "V")
 
+
 (defmethod cleavir-ir-graphviz:label ((object cleavir-ir:immediate-input))
   (cleavir-ir:value object))
 
+
 (defmethod cleavir-ir-graphviz:label ((object cleavir-ir:load-time-value-input))
   (cleavir-ir:form object))
+
+
+(defun class-list (object)
+  (mapcan (lambda (class)
+            (let ((name (class-name class)))
+              (unless (member name '(standard-object t))
+                (list (format nil "~(~A~)" name)))))
+          (closer-mop:class-precedence-list (class-of object))))
+
 
 (defmethod make-node (object)
   (make-instance 'cytoscape:element
                  :group "nodes"
                  :data (list (cons "id" (object-id object))
                              (cons "label" (cleavir-ir-graphviz:label object)))
-                 :classes (list (format nil "~(~A~)" (type-of object)))))
+                 :classes (class-list object)))
+
 
 (defmethod make-edges (object))
+
 
 (defmethod make-edges ((object cleavir-ir:instruction))
   (let (elements)
@@ -103,33 +122,41 @@
         (call-next-method)))
 
 
-(defun hir-graph (initial-instruction)
+(defmethod cytoscape:add-graph (widget (initial-instruction cleavir-ir:instruction))
   (let* ((*object-ids* (make-hash-table :test #'eq))
-         elements)
-    (push (make-instance 'cytoscape:element
-                         :group "edges"
-                         :data (list (cons "source" "start")
-                                     (cons "target" (object-id initial-instruction)))
-                         :classes (list "start"))
-          elements)
-    (push (make-instance 'cytoscape:element
-                         :group "nodes"
-                         :data (list (cons "id" "start")
-                                     (cons "label" "START"))
-                         :classes (list "start"))
-          elements)
+         (start-id (jupyter:make-uuid))
+         (elements (list (make-instance 'cytoscape:element
+                                        :group "nodes"
+                                        :data (list (cons "id" start-id)
+                                                    (cons "label" "START"))
+                                        :classes (list "start"))
+                         (make-instance 'cytoscape:element
+                                        :group "edges"
+                                        :data (list (cons "source" start-id)
+                                                    (cons "target" (object-id initial-instruction)))
+                                        :classes (list "start")))))
+
     (cleavir-ir:map-instructions-arbitrary-order
       (lambda (instruction)
         (setq elements (nconc elements (make-edges instruction))))
       initial-instruction)
+
     (maphash (lambda (object id)
                (push (make-node object) elements))
              *object-ids*)
-    (make-instance 'cytoscape:cytoscape-widget
-                   :graph-layouts (list (make-instance 'cytoscape:dagre-layout))
-                   :graph-style *graph-style*
-                   :elements elements
-                   :layout (make-instance 'jupyter-widgets:layout :width "auto" :height "2000px"))))
+
+    (setf (cytoscape:elements widget)
+          (nconc (cytoscape:elements widget) elements))))
+
+
+(defun hir-graph (&rest instructions)
+  (let ((widget (make-instance 'cytoscape:cytoscape-widget
+                               :graph-layouts (list (make-instance 'cytoscape:dagre-layout))
+                               :graph-style *graph-style*
+                               :layout (make-instance 'jupyter-widgets:layout :width "auto" :height "2000px"))))
+    (dolist (instruction instructions)
+      (cytoscape:add-graph widget instruction))
+    widget))
 
 
 (defun draw-form-hir2 (form)
