@@ -20,7 +20,7 @@
 ;; LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 ;; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ;; THE SOFTWARE.
-;;  
+;;
 ;; This is an open source license for the CANDO software from Temple University, but it is not the only one. Contact Temple University at mailto:techtransfer@temple.edu if you would like a different license.
 
 ;; -^-
@@ -29,5 +29,6 @@
   (:use #:common-lisp)
   (:export
    #:draw-form-hir
+   #:set-graph-style
    ))
 

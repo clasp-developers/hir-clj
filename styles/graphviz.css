@@ -1,0 +1,69 @@
+* {
+  font-size: 10px;
+  label: data(label);
+  source-label: data(source_label);
+  target-label: data(target_label);
+}
+
+node {
+  background-color: white;
+  border-width: 1px;
+  height: label;
+  padding: 2px;
+  shape: rectangle;
+  text-halign: center;
+  text-valign: center;
+  width: label;
+}
+
+edge {
+  curve-style: bezier;
+  line-color: black;
+  target-arrow-color: black;
+  target-arrow-shape: triangle;
+  text-halign: right;
+  width: 1px;
+}
+
+.code, .destination {
+  line-color: pink;
+  line-style: dashed;
+  target-arrow-color: pink;
+}
+
+.input {
+  line-color: red;
+  line-style: dashed;
+  target-arrow-color: red;
+}
+
+.output {
+  line-color: blue;
+  line-style: dashed;
+  target-arrow-color: blue;
+}
+
+.constant-input {
+  background-color: green;
+  shape: round-rectangle;
+}
+
+.lexical-location {
+  background-color: yellow;
+  shape: round-rectangle;
+}
+
+.values-location {
+  background-color: blue;
+  shape: round-rectangle;
+}
+
+.immediate-input {
+  background-color: aquamarine;
+  shape: round-rectangle;
+}
+
+.load-time-value-input {
+  background-color: orange;
+}
+
