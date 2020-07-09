@@ -28,7 +28,9 @@
 (defpackage #:hir-clj
   (:use #:common-lisp)
   (:export
-   #:draw-form-hir
-   #:set-graph-style
-   ))
+    #:make-hir
+    #:make-hir-graph
+    #:*default-graph-style*
+    #:load-graph-style
+    #:set-graph-style))
 

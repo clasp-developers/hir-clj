@@ -1,62 +1,31 @@
 * {
-  font-size: 10px;
   label: data(label);
   source-label: data(source_label);
   target-label: data(target_label);
 }
 
-node {
-  height: label;
-  padding: 8px;
-  shape: rectangle;
-  text-halign: center;
-  text-valign: center;
-  width: label;
-}
-
 edge {
   curve-style: bezier;
   target-arrow-shape: triangle;
-  text-halign: right;
-  width: 1px;
-  source-text-offset: 4px;
-  source-text-margin-x: 4px;
-  source-text-margin-y: 4px;
 }
 
 node.start {
   shape: round-rectangle;
 }
 
+.instruction {
+  shape: cut-rectangle;
+}
+
 .code, .destination {
   target-arrow-shape: triangle-cross;
 }
 
-.input {
-  target-arrow-shape: diamond;
+.input, .output {
+  target-arrow-shape: triangle-cross;
+  line-style: dashed;
 }
 
-.output {
-  target-arrow-shape: circle;
+.datum {
+  shape: tag;
 }
-
-.constant-input {
-  shape: cut-rectangle;
-}
-
-.lexical-location {
-  shape: cut-rectangle;
-}
-
-.values-location {
-  shape: cut-rectangle;
-}
-
-.immediate-input {
-  shape: cut-rectangle;
-}
-
-.load-time-value-input {
-  shape: cut-rectangle;
-}
-
