@@ -85,9 +85,11 @@
 
 
 (defun proxy-of-object (graph object &optional create)
-  (or (gethash object (object-to-proxy graph))
-      (and create
-           (setf (gethash object (object-to-proxy graph)) (make-instance 'container :object object)))))
+  (let ((proxy (gethash object (object-to-proxy graph))))
+    (cond
+      (proxy proxy)
+      (create
+        (setf (gethash object (object-to-proxy graph)) (make-instance 'container :object object))))))
 
 
 (defun set-graph-style (graph name)
@@ -210,7 +212,8 @@
   (cdr (assoc "id" (cytoscape:data el) :test #'equal)))
 
 
-(defun generation-sort (elements)  (prog (results younger-nodes
+(defun generation-sort (elements)
+  (prog (results younger-nodes
          (nodes (mapcan (lambda (el)
                           (when (equal "nodes" (cytoscape:group el))
                             (list el)))
@@ -223,12 +226,20 @@
                                  (list el)))
                              elements))))
     (setq younger-nodes nil)
+    (format t "~A~%" (mapcar #'cytoscape:data nodes))
+    (finish-output)
     (dolist (node nodes)
       (if (or (null (parent node))
               (member (parent node) results :key #'id :test #'equal))
         (push node results)
         (push node younger-nodes)))
-    (setq nodes younger-nodes)
+    (cond
+      ((= (length nodes) (length younger-nodes))
+        (write-line "bail")
+        (setq results (nconc younger-nodes results))
+        (setq nodes nil))
+      (t
+        (setq nodes younger-nodes)))
     (go next)))
 
 
@@ -247,6 +258,7 @@
                                                     (cons "target" (id-of-object graph initial-instruction)))
                                         :classes (list "start")))))
 
+
     (when show-owners
       (cleavir-ir:map-instructions-with-owner
         (lambda (instruction owner &aux proxy)
@@ -260,22 +272,43 @@
                 (setf (gethash datum owners) proxy)))))
         initial-instruction))
 
+    (write-line "add basic blocks")
+    (finish-output)
+
     (when show-basic-blocks
-      (dolist (basic-block (cleavir-basic-blocks:basic-blocks initial-instruction))
-        (let ((container (make-instance 'container :object basic-block))
-              (owner (cleavir-basic-blocks:owner basic-block)))
-          (when (and show-owners owner)
-            (setf (gethash container owners)
-                  (or (proxy-of-object graph owner) owner)))
-          (cleavir-basic-blocks:map-basic-block-instructions
-            (lambda (instruction)
-              (setf (gethash instruction owners) container))
-            basic-block))))
+      (let ((datum-blocks (make-hash-table :test #'eq)))
+        (dolist (basic-block (cleavir-basic-blocks:basic-blocks initial-instruction))
+          (unless (and show-owners
+                       (typep (cleavir-basic-blocks:first-instruction basic-block) 'cleavir-ir:enter-instruction))
+            (format t "~A~%" (cleavir-basic-blocks:first-instruction basic-block))
+            (let ((container (make-instance 'container :object basic-block))
+                  (owner (cleavir-basic-blocks:owner basic-block)))
+              (when (and show-owners owner)
+                (setf (gethash container owners)
+                      (or (proxy-of-object graph owner) owner)))
+              (cleavir-basic-blocks:map-basic-block-instructions
+                (lambda (instruction)
+                  (setf (gethash instruction owners) container)
+                  (dolist (datum (cleavir-ir:outputs instruction))
+                    (setf (gethash datum datum-blocks)
+                          (if (gethash datum datum-blocks) t container))))
+                basic-block))))
+        (maphash (lambda (datum owner)
+                   (format t "~A ~A~%" datum owner)
+                   (unless (eql t owner)
+                      (setf (gethash datum owners) owner)))
+                 datum-blocks)))
+
+    (write-line "create edges")
+    (finish-output)
 
     (cleavir-ir:map-instructions-with-owner
       (lambda (instruction owner)
         (setq elements (nconc elements (make-edges graph instruction))))
       initial-instruction)
+
+      (write-line "create nodes")
+      (finish-output)
 
     (maphash (lambda (object id)
                (push (make-node graph object (gethash object owners) (proxy-of-object graph object)) elements))
@@ -284,3 +317,9 @@
     (setf (cytoscape:elements (cytoscape graph))
           (nconc (cytoscape:elements (cytoscape graph))
                  (generation-sort elements))))) 
+
+
+(defmethod initialize-instance :after ((graph hir-graph) &rest initargs &key &allow-other-keys)
+  (let ((form (getf initargs :form)))
+    (when form
+      (graph-form graph form :show-owners t :show-basic-blocks t))))

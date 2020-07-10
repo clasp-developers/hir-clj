@@ -28,6 +28,7 @@
 (defpackage #:hir-clj
   (:use #:common-lisp)
   (:export
+    #:hir-graph
     #:make-hir
     #:make-hir-graph
     #:*default-graph-style*

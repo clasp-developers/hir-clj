@@ -1,8 +1,17 @@
 * {
   font-size: 10px;
+}
+
+*[label] {
   label: data(label);
-  source-label: data(source_label);
-  target-label: data(target_label);
+}
+
+*[source-label] {
+  source-label: data(source-label);
+}
+
+*[target-label] {
+  target-label: data(target-label);
 }
 
 node {
