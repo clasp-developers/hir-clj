@@ -242,9 +242,14 @@
         (setq nodes younger-nodes)))
     (go next)))
 
+(defun item-id (item hash-table)
+  (or (gethash item hash-table)
+      (setf (gethash item hash-table) (jupyter:make-uuid))))
 
-(defun graph-form (graph form &key show-owners show-basic-blocks direct)
+(defun graph-form (graph form &key direct)
   (let* ((initial-instruction (make-hir form direct))
+         (node-ids (make-hash-table :test #'eq))
+         (parent-ids (make-hash-table :test #'eq))
          (owners (make-hash-table :test #'eq))
          (start-id (jupyter:make-uuid))
          (elements (list (make-instance 'cytoscape:element
@@ -255,71 +260,137 @@
                          (make-instance 'cytoscape:element
                                         :group "edges"
                                         :data (list (cons "source" start-id)
-                                                    (cons "target" (id-of-object graph initial-instruction)))
+                                                    (cons "target" (item-id initial-instruction node-ids)))
                                         :classes (list "start")))))
 
 
-    (when show-owners
-      (cleavir-ir:map-instructions-with-owner
-        (lambda (instruction owner &aux proxy)
-          (when owner
-            (setq proxy (proxy-of-object graph owner t))
-            (unless (gethash instruction owners)
-              (setf (gethash instruction owners) proxy))
-            (dolist (datum (append (cleavir-ir:inputs instruction)
-                                   (cleavir-ir:outputs instruction)))
-              (unless (gethash datum owners)
-                (setf (gethash datum owners) proxy)))))
-        initial-instruction))
+    (write-line "Assign owners and index instructions and datums")
+    (finish-output)
+
+    (cleavir-ir:map-instructions-with-owner
+      (lambda (instruction owner &aux (parent-id (item-id owner parent-ids)))
+        (setf (gethash instruction owners) parent-id)
+        (item-id instruction node-ids)
+        (dolist (datum (append (cleavir-ir:inputs instruction)
+                               (cleavir-ir:outputs instruction)))
+          (item-id datum node-ids)
+          (unless (gethash datum owners)
+            (setf (gethash datum owners) parent-id))))
+      initial-instruction)
 
     (write-line "add basic blocks")
     (finish-output)
 
-    (when show-basic-blocks
-      (let ((datum-blocks (make-hash-table :test #'eq)))
-        (dolist (basic-block (cleavir-basic-blocks:basic-blocks initial-instruction))
-          (unless (and show-owners
-                       (typep (cleavir-basic-blocks:first-instruction basic-block) 'cleavir-ir:enter-instruction))
-            (format t "~A~%" (cleavir-basic-blocks:first-instruction basic-block))
-            (let ((container (make-instance 'container :object basic-block))
-                  (owner (cleavir-basic-blocks:owner basic-block)))
-              (when (and show-owners owner)
-                (setf (gethash container owners)
-                      (or (proxy-of-object graph owner) owner)))
-              (cleavir-basic-blocks:map-basic-block-instructions
-                (lambda (instruction)
-                  (setf (gethash instruction owners) container)
-                  (dolist (datum (cleavir-ir:outputs instruction))
-                    (setf (gethash datum datum-blocks)
-                          (if (gethash datum datum-blocks) t container))))
-                basic-block))))
-        (maphash (lambda (datum owner)
-                   (format t "~A ~A~%" datum owner)
-                   (unless (eql t owner)
-                      (setf (gethash datum owners) owner)))
-                 datum-blocks)))
+    (let ((datum-blocks (make-hash-table :test #'eq)))
+      (dolist (basic-block (cleavir-basic-blocks:basic-blocks initial-instruction))
+        (unless (typep (cleavir-basic-blocks:first-instruction basic-block) 'cleavir-ir:enter-instruction)
+          (let ((parent-id (item-id basic-block parent-ids))
+                (owner (cleavir-basic-blocks:owner basic-block)))
+            (when owner
+              (setf (gethash basic-block owners)
+                    (item-id owner parent-ids)))
+            (cleavir-basic-blocks:map-basic-block-instructions
+              (lambda (instruction)
+                (setf (gethash instruction owners) parent-id)
+                (dolist (datum (cleavir-ir:outputs instruction))
+                  (setf (gethash datum datum-blocks)
+                        (if (gethash datum datum-blocks) t parent-id))))
+              basic-block))))
+      (maphash (lambda (datum owner)
+                 (unless (eql t owner)
+                   (setf (gethash datum owners) owner)))
+               datum-blocks))
 
-    (write-line "create edges")
-    (finish-output)
+    (maphash (lambda (object id &aux (data (list (cons "id" id)
+                                                 (cons "label" (cleavir-ir-graphviz:label object))))
+                                     (parent-id (gethash object owners))
+                                     (classes (class-list object)))
+               (when parent-id
+                 (push (cons "parent" parent-id) data))
+               (when (gethash object parent-ids)
+                 (push "proxy" classes))
+               (push (make-instance 'cytoscape:element
+                                    :groups "nodes"
+                                    :data data
+                                    :classes classes)
+                     elements)
 
-    (cleavir-ir:map-instructions-with-owner
-      (lambda (instruction owner)
-        (setq elements (nconc elements (make-edges graph instruction))))
-      initial-instruction)
+               (when (typep object 'cleavir-ir:enclose-instruction)
+                  (push (make-instance 'cytoscape:element
+                               :group "edges"
+                               :data (list (cons "id" (jupyter:make-uuid))
+                                           (cons "source" (gethash (cleavir-ir:code object) node-ids))
+                                           (cons "target" id))
+                               :classes (list "code"))
+                        elements))
 
-      (write-line "create nodes")
-      (finish-output)
+               (when (typep object 'cleavir-ir:unwind-instruction)
+                  (push (make-instance 'cytoscape:element
+                               :group "edges"
+                               :data (list (cons "id" (jupyter:make-uuid))
+                                           (cons "source" (gethash (cleavir-ir:destination object) node-ids))
+                                           (cons "target" id))
+                               :classes (list "destination"))
+                        elements))
 
-    (maphash (lambda (object id)
-               (push (make-node graph object (gethash object owners) (proxy-of-object graph object)) elements))
-             (object-to-id graph))
+               (when (typep object 'cleavir-ir:instruction)
+                 (do ((successors (cleavir-ir:successors object) (cdr successors))
+                      (i 0 (1+ i)))
+                     ((null successors))
+                   (push (make-instance 'cytoscape:element
+                                        :group "edges"
+                                        :data (list (cons "id" (jupyter:make-uuid))
+                                                    (cons "source" id)
+                                                    (cons "target" (gethash (car successors) node-ids))
+                                                    (cons "label" (write-to-string i)))
+                                        :classes (list "successor"))
+                         elements))
+
+                 (do ((inputs (cleavir-ir:inputs object) (cdr inputs))
+                      (i 0 (1+ i)))
+                     ((null inputs))
+                   (push (make-instance 'cytoscape:element
+                                        :group "edges"
+                                        :data (list (cons "id" (jupyter:make-uuid))
+                                                    (cons "source" (gethash (car inputs) node-ids))
+                                                    (cons "target" id)
+                                                    (cons "label" (cleavir-ir-graphviz:input-label object (car inputs) i)))
+                                        :classes (list "input"))
+                         elements))
+
+                 (do ((outputs (cleavir-ir:outputs object) (cdr outputs))
+                      (i 0 (1+ i)))
+                     ((null outputs))
+                   (push (make-instance 'cytoscape:element
+                                        :group "edges"
+                                        :data (list (cons "id" (jupyter:make-uuid))
+                                                    (cons "source" id)
+                                                    (cons "target" (gethash (car outputs) node-ids))
+                                                    (cons "label" (cleavir-ir-graphviz:output-label object (car outputs) i)))
+                                        :classes (list "output"))
+                         elements))))
+             node-ids)
+
+    (maphash (lambda (object id &aux (data (list (cons "id" id)
+                                                 (cons "label" (cleavir-ir-graphviz:label object))))
+                                     (parent-id (gethash object owners)))
+               (unless (or (null parent-id)
+                           (equal id parent-id))
+                 (push (cons "parent" parent-id) data))
+               (push (make-instance 'cytoscape:element
+                                    :groups "nodes"
+                                    :data data
+                                    :classes (cons "parent" (class-list object)))
+                     elements))
+                     parent-ids)
+
+
 
     (setf (cytoscape:elements (cytoscape graph))
           (nconc (cytoscape:elements (cytoscape graph))
-                 (generation-sort elements))))) 
-
+                 (generation-sort elements)))))
 
 (defmethod initialize-instance :after ((graph hir-graph) &rest initargs &key &allow-other-keys)
   (let ((form (getf initargs :form)))
     (when form
-      (graph-form graph form :show-owners t :show-basic-blocks t))))
+      (graph-form graph form))))

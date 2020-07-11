@@ -34,6 +34,10 @@ edge {
   width: 1px;
 }
 
+.proxy {
+  background-color: red;
+}
+
 .code, .destination {
   line-color: pink;
   line-style: dashed;
