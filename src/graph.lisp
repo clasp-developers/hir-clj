@@ -212,6 +212,14 @@
   (cdr (assoc "id" (cytoscape:data el) :test #'equal)))
 
 
+(defun source (el)
+  (cdr (assoc "source" (cytoscape:data el) :test #'equal)))
+
+
+(defun target (el)
+  (cdr (assoc "target" (cytoscape:data el) :test #'equal)))
+
+
 (defun generation-sort (elements)
   (prog (results younger-nodes
          (nodes (mapcan (lambda (el)
@@ -303,8 +311,8 @@
 
     (maphash (lambda (object id &aux (data (list (cons "id" id)
                                                  (cons "label" (cleavir-ir-graphviz:label object))))
-                                     (parent-id (gethash object owners))
-                                     (classes (class-list object)))
+                      (parent-id (gethash object owners))
+                      (classes (class-list object)))
                (when parent-id
                  (push (cons "parent" parent-id) data))
                (when (gethash object parent-ids)
@@ -316,22 +324,22 @@
                      elements)
 
                (when (typep object 'cleavir-ir:enclose-instruction)
-                  (push (make-instance 'cytoscape:element
-                               :group "edges"
-                               :data (list (cons "id" (jupyter:make-uuid))
-                                           (cons "source" (gethash (cleavir-ir:code object) node-ids))
-                                           (cons "target" id))
-                               :classes (list "code"))
-                        elements))
+                 (push (make-instance 'cytoscape:element
+                                      :group "edges"
+                                      :data (list (cons "id" (jupyter:make-uuid))
+                                                  (cons "source" (gethash (cleavir-ir:code object) node-ids))
+                                                  (cons "target" id))
+                                      :classes (list "code"))
+                       elements))
 
                (when (typep object 'cleavir-ir:unwind-instruction)
-                  (push (make-instance 'cytoscape:element
-                               :group "edges"
-                               :data (list (cons "id" (jupyter:make-uuid))
-                                           (cons "source" (gethash (cleavir-ir:destination object) node-ids))
-                                           (cons "target" id))
-                               :classes (list "destination"))
-                        elements))
+                 (push (make-instance 'cytoscape:element
+                                      :group "edges"
+                                      :data (list (cons "id" (jupyter:make-uuid))
+                                                  (cons "source" (gethash (cleavir-ir:destination object) node-ids))
+                                                  (cons "target" id))
+                                      :classes (list "destination"))
+                       elements))
 
                (when (typep object 'cleavir-ir:instruction)
                  (do ((successors (cleavir-ir:successors object) (cdr successors))
@@ -371,9 +379,10 @@
                          elements))))
              node-ids)
 
+    (write-line "-1")
     (maphash (lambda (object id &aux (data (list (cons "id" id)
                                                  (cons "label" (cleavir-ir-graphviz:label object))))
-                                     (parent-id (gethash object owners)))
+                      (parent-id (gethash object owners)))
                (unless (or (null parent-id)
                            (equal id parent-id))
                  (push (cons "parent" parent-id) data))
@@ -382,13 +391,72 @@
                                     :data data
                                     :classes (cons "parent" (class-list object)))
                      elements))
-                     parent-ids)
+             parent-ids)
+
+    (write-line "0")
+    (setq elements (generation-sort elements))
+    (write-line "a")
 
 
+    (dolist (parent (nreverse (mapcan (lambda (element)
+                                        (when (member "parent" (cytoscape:classes element) :test #'equal)
+                                          (list element)))
+                                      elements)))
+      (let* ((parent-id (id parent))
+             (parent-expand-class (format nil "~A-e" parent-id)); (jupyter:make-uuid))
+             (parent-collapse-class (format nil "~A-c" parent-id)) ;(jupyter:make-uuid))
+             (children (mapcan (lambda (element)
+                                 (when (equal (parent element) parent-id)
+                                   (list element)))
+                               elements))
+             (children-ids (mapcar #'id children))
+             new-edges)
+        (write-line "1")
+        (setf (cytoscape:data parent) (nconc (cytoscape:data parent)
+                                             (list (cons "expand" parent-expand-class)
+                                                   (cons "collapse" parent-expand-class))))
+        (write-line "2")
+        (dolist (child children)
+          (write-line "3")
+          (setf (cytoscape:classes child)
+                (cons parent-expand-class (cytoscape:classes child)))
+          (setf (cytoscape:removed child) t))
+        (dolist (element elements)
+          (write-line "4")
+          (when (equal "edges" (cytoscape:group element))
+            (let ((source-child-p (member (source element) children-ids :test #'equal))
+                  (target-child-p (member (target element) children-ids :test #'equal)))
+              (when (or source-child-p target-child-p)
+                (cond
+                  ((and source-child-p (not target-child-p))
+                    (push (make-instance 'cytoscape:element
+                                         :group "edges"
+                                         :removed (cytoscape:removed element)
+                                         :data (list (cons "id" (jupyter:make-uuid))
+                                                     (cons "source" parent-id)
+                                                     (cons "target" (target element)))
+                                         :classes (append (list parent-collapse-class) (cytoscape:classes element)))
+                          new-edges))
+                  ((and (not source-child-p) target-child-p)
+                    (push (make-instance 'cytoscape:element
+                                         :group "edges"
+                                         :removed (cytoscape:removed element)
+                                         :data (list (cons "id" (jupyter:make-uuid))
+                                                     (cons "source" (source element))
+                                                     (cons "target" parent-id))
+                                         :classes (append (list parent-collapse-class) (cytoscape:classes element)))
+                          new-edges)))
+                (write-line "6")
+                (setf (cytoscape:classes element)
+                      (cons parent-expand-class (cytoscape:classes element)))
+                (setf (cytoscape:removed element) t)))))
+        (write-line "7")
+        (setq elements (nconc elements new-edges))))
 
+    (write-line "8")
     (setf (cytoscape:elements (cytoscape graph))
           (nconc (cytoscape:elements (cytoscape graph))
-                 (generation-sort elements)))))
+                 elements))))
 
 (defmethod initialize-instance :after ((graph hir-graph) &rest initargs &key &allow-other-keys)
   (let ((form (getf initargs :form)))
