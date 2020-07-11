@@ -63,7 +63,15 @@
      :initform (make-instance 'cytoscape:cytoscape-widget
                                :graph-layouts (list (make-instance 'cytoscape:dagre-layout :align "L"))
                                :graph-style *default-graph-style*
-                               :layout (make-instance 'jupyter-widgets:layout :width "auto" :height "2000px")))
+                               :layout (make-instance 'jupyter-widgets:layout :height "800px")))
+   (expand-command
+     :accessor expand-command
+     :initform (make-instance 'cytoscape:menu-command
+                              :content "<span class='fa fa-expand fa-2x'></span>"))
+   (collapse-command
+     :accessor collapse-command
+     :initform (make-instance 'cytoscape:menu-command
+                              :content "<span class='fa fa-compress fa-2x'></span>"))
    (object-to-id
      :accessor object-to-id
      :initform (make-hash-table :test #'eq))
@@ -234,8 +242,6 @@
                                  (list el)))
                              elements))))
     (setq younger-nodes nil)
-    (format t "~A~%" (mapcar #'cytoscape:data nodes))
-    (finish-output)
     (dolist (node nodes)
       (if (or (null (parent node))
               (member (parent node) results :key #'id :test #'equal))
@@ -243,7 +249,6 @@
         (push node younger-nodes)))
     (cond
       ((= (length nodes) (length younger-nodes))
-        (write-line "bail")
         (setq results (nconc younger-nodes results))
         (setq nodes nil))
       (t
@@ -272,9 +277,6 @@
                                         :classes (list "start")))))
 
 
-    (write-line "Assign owners and index instructions and datums")
-    (finish-output)
-
     (cleavir-ir:map-instructions-with-owner
       (lambda (instruction owner &aux (parent-id (item-id owner parent-ids)))
         (setf (gethash instruction owners) parent-id)
@@ -285,9 +287,6 @@
           (unless (gethash datum owners)
             (setf (gethash datum owners) parent-id))))
       initial-instruction)
-
-    (write-line "add basic blocks")
-    (finish-output)
 
     (let ((datum-blocks (make-hash-table :test #'eq)))
       (dolist (basic-block (cleavir-basic-blocks:basic-blocks initial-instruction))
@@ -379,7 +378,6 @@
                          elements))))
              node-ids)
 
-    (write-line "-1")
     (maphash (lambda (object id &aux (data (list (cons "id" id)
                                                  (cons "label" (cleavir-ir-graphviz:label object))))
                       (parent-id (gethash object owners)))
@@ -393,9 +391,7 @@
                      elements))
              parent-ids)
 
-    (write-line "0")
     (setq elements (generation-sort elements))
-    (write-line "a")
 
 
     (dolist (parent (nreverse (mapcan (lambda (element)
@@ -411,18 +407,14 @@
                                elements))
              (children-ids (mapcar #'id children))
              new-edges)
-        (write-line "1")
         (setf (cytoscape:data parent) (nconc (cytoscape:data parent)
                                              (list (cons "expand" parent-expand-class)
-                                                   (cons "collapse" parent-expand-class))))
-        (write-line "2")
+                                                   (cons "collapse" parent-collapse-class))))
         (dolist (child children)
-          (write-line "3")
           (setf (cytoscape:classes child)
                 (cons parent-expand-class (cytoscape:classes child)))
           (setf (cytoscape:removed child) t))
         (dolist (element elements)
-          (write-line "4")
           (when (equal "edges" (cytoscape:group element))
             (let ((source-child-p (member (source element) children-ids :test #'equal))
                   (target-child-p (member (target element) children-ids :test #'equal)))
@@ -446,19 +438,61 @@
                                                      (cons "target" parent-id))
                                          :classes (append (list parent-collapse-class) (cytoscape:classes element)))
                           new-edges)))
-                (write-line "6")
                 (setf (cytoscape:classes element)
                       (cons parent-expand-class (cytoscape:classes element)))
                 (setf (cytoscape:removed element) t)))))
-        (write-line "7")
         (setq elements (nconc elements new-edges))))
 
-    (write-line "8")
     (setf (cytoscape:elements (cytoscape graph))
           (nconc (cytoscape:elements (cytoscape graph))
                  elements))))
 
 (defmethod initialize-instance :after ((graph hir-graph) &rest initargs &key &allow-other-keys)
+  (cytoscape:on-menu-command-select (expand-command graph)
+                                    (lambda (command-instance id)
+                                      (declare (ignore command-instance))
+                                      (expand-node graph id)))
+  (cytoscape:on-menu-command-select (collapse-command graph)
+                                    (lambda (command-instance id)
+                                      (declare (ignore command-instance))
+                                      (collapse-node graph id)))
+  (setf (cytoscape:context-menus (cytoscape graph))
+        (list (make-instance 'cytoscape:context-menu
+                             :selector "node"
+                             :commands (list (expand-command graph) (collapse-command graph)))))
   (let ((form (getf initargs :form)))
     (when form
       (graph-form graph form))))
+
+
+(defun expand-node (graph node)
+  (when (stringp node)
+    (setq node (find node (cytoscape:elements (cytoscape graph)) :key #'id :test #'equal)))
+  (let ((expand-class (cdr (assoc "expand" (cytoscape:data node) :test #'equal)))
+        (collapse-class (cdr (assoc "collapse" (cytoscape:data node) :test #'equal))))
+    (when collapse-class
+      (dolist (element (reverse (cytoscape:elements (cytoscape graph))))
+        (when (member collapse-class (cytoscape:classes element) :test #'equal)
+          (setf (cytoscape:removed element) t))))
+    (when expand-class
+      (dolist (element (cytoscape:elements (cytoscape graph)))
+        (when (member expand-class (cytoscape:classes element) :test #'equal)
+          (setf (cytoscape:removed element) nil)))))
+  (cytoscape:layout (cytoscape graph)))
+
+
+(defun collapse-node (graph node)
+  (when (stringp node)
+    (setq node (find node (cytoscape:elements (cytoscape graph)) :key #'id :test #'equal)))
+  (let ((expand-class (cdr (assoc "expand" (cytoscape:data node) :test #'equal)))
+        (collapse-class (cdr (assoc "collapse" (cytoscape:data node) :test #'equal))))
+    (when expand-class
+      (dolist (element (reverse (cytoscape:elements (cytoscape graph))))
+        (when (member expand-class (cytoscape:classes element) :test #'equal)
+          (setf (cytoscape:removed element) t))))
+    (when collapse-class
+      (dolist (element (cytoscape:elements (cytoscape graph)))
+        (when (member collapse-class (cytoscape:classes element) :test #'equal)
+          (setf (cytoscape:removed element) nil)))))
+  (cytoscape:layout (cytoscape graph)))
+

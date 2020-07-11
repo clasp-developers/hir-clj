@@ -28,6 +28,8 @@
 (defpackage #:hir-clj
   (:use #:common-lisp)
   (:export
+    #:expand-node
+    #:collapse-node
     #:hir-graph
     #:make-hir
     #:make-hir-graph
