@@ -107,91 +107,6 @@
   (setf (cytoscape:graph-style (cytoscape graph)) (load-graph-style name)))
 
 
-(defgeneric make-node (graph object owner proxy))
-
-
-(defgeneric make-edges (graph object))
-
-
-(defmethod make-node (graph object owner proxy)
-  (let ((data (list (cons "id" (id-of-object graph object))
-                    (cons "label" (cleavir-ir-graphviz:label object)))))
-    (cond
-      (proxy
-        (push (cons "parent" (id-of-object graph proxy)) data))
-      (owner
-        (push (cons "parent" (id-of-object graph owner)) data)))
-    (make-instance 'cytoscape:element
-                   :group "nodes"
-                   :data data
-                   :classes (class-list object))))
-
-
-(defmethod make-edges (graph object))
-
-
-(defmethod make-edges (graph (object cleavir-ir:instruction))
-  (let (elements)
-
-    (do ((successors (cleavir-ir:successors object) (cdr successors))
-         (i 0 (1+ i)))
-        ((null successors))
-      (push (make-instance 'cytoscape:element
-                           :group "edges"
-                           :data (list (cons "id" (jupyter:make-uuid))
-                                       (cons "source" (id-of-object graph object))
-                                       (cons "target" (id-of-object graph (car successors)))
-                                       (cons "label" (write-to-string i)))
-                           :classes (list "successor"))
-            elements))
-
-    (do ((inputs (cleavir-ir:inputs object) (cdr inputs))
-         (i 0 (1+ i)))
-        ((null inputs))
-      (push (make-instance 'cytoscape:element
-                           :group "edges"
-                           :data (list (cons "id" (jupyter:make-uuid))
-                                       (cons "source" (id-of-object graph (car inputs)))
-                                       (cons "target" (id-of-object graph object))
-                                       (cons "label" (cleavir-ir-graphviz:input-label object (car inputs) i)))
-                           :classes (list "input"))
-            elements))
-
-    (do ((outputs (cleavir-ir:outputs object) (cdr outputs))
-         (i 0 (1+ i)))
-        ((null outputs))
-      (push (make-instance 'cytoscape:element
-                           :group "edges"
-                           :data (list (cons "id" (jupyter:make-uuid))
-                                       (cons "source" (id-of-object graph object))
-                                       (cons "target" (id-of-object graph (car outputs)))
-                                       (cons "label" (cleavir-ir-graphviz:output-label object (car outputs) i)))
-                           :classes (list "output"))
-            elements))
-
-    elements))
-
-
-(defmethod make-edges (graph (object cleavir-ir:enclose-instruction))
-  (append (list (make-instance 'cytoscape:element
-                               :group "edges"
-                               :data (list (cons "id" (jupyter:make-uuid))
-                                           (cons "source" (id-of-object graph (cleavir-ir:code object)))
-                                           (cons "target" (id-of-object graph object)))
-                               :classes (list "code")))
-          (call-next-method)))
-
-
-(defmethod make-edges (graph (object cleavir-ir:unwind-instruction))
-  (cons (make-instance 'cytoscape:element
-                       :group "edges"
-                       :data (list (cons "id" (jupyter:make-uuid))
-                                   (cons "source" (id-of-object graph (cleavir-ir:destination object)))
-                                   (cons "target" (id-of-object graph object)))
-                       :classes (list "destination"))
-        (call-next-method)))
-
-
 (defun make-hir (form &optional direct)
   (cond
     (direct
@@ -274,6 +189,110 @@
   (or (gethash item hash-table)
       (setf (gethash item hash-table) (jupyter:make-uuid))))
 
+
+(defun make-edge (source target &key (mask 0) (state 0) label classes
+                                &aux (data (list (cons "id" (jupyter:make-uuid))
+                                                 (cons "mask" mask)
+                                                 (cons "state" state)
+                                                 (cons "source" source)
+                                                 (cons "target" target))))
+  (when label
+    (push (cons "label" label) data))
+  (make-instance 'cytoscape:element
+                 :group "edges"
+                 :data data
+                 :classes classes))
+
+
+(defun make-node (id &key (mask 0) (state 0) label classes parent
+                     &aux (data (list (cons "id" id)
+                                      (cons "mask" mask)
+                                      (cons "state" state))))
+  (when label
+    (push (cons "label" label) data))
+  (when parent
+    (push (cons "parent" parent) data))
+  (make-instance 'cytoscape:element
+                 :group "nodes"
+                 :data data
+                 :classes classes))
+
+
+; Need a little bit of name clarification here. node-ids is a hashtable mapping objects to
+; their node representation id. parent-ids is map of objects to their parent representation
+; (enter-instructions) and owner-ids is map of objects to their enclosing compound parent.
+(defgeneric make-elements (object node-ids parent-ids owner-ids))
+
+
+(defmethod make-elements (object node-ids parent-ids owner-ids)
+  (let ((parent-id (gethash object parent-ids))
+        (node-id (gethash object node-ids))
+        (label (cleavir-ir-graphviz:label object))
+        (owner (gethash object owner-ids))
+        (classes (class-list object))
+        elements)
+
+    (when node-id
+      (push (make-node node-id
+                       :label label
+                       :parent owner
+                       :classes (if parent-id
+                                  (cons "proxy" classes)
+                                  classes))
+            elements))
+
+    (when parent-id
+      (push (make-node parent-id
+                       :label label
+                       :parent (unless (equal owner parent-id)
+                                 owner)
+                       :classes (cons "parent" classes))
+            elements))
+
+    elements))
+
+
+(defmethod make-elements ((object cleavir-ir:instruction) node-ids parent-ids owner-ids)
+  (let (elements
+        (id (gethash object node-ids)))
+    (do ((successors (cleavir-ir:successors object) (cdr successors))
+         (i 0 (1+ i)))
+        ((null successors))
+      (push (make-edge id (gethash (car successors) node-ids)
+                       :classes (list "successor") :label (write-to-string i))
+            elements))
+
+    (do ((inputs (cleavir-ir:inputs object) (cdr inputs))
+         (i 0 (1+ i)))
+        ((null inputs))
+      (push (make-edge (gethash (car inputs) node-ids) (gethash object node-ids)
+                       :classes (list "input")
+                       :label (cleavir-ir-graphviz:input-label object (car inputs) i))
+            elements))
+
+    (do ((outputs (cleavir-ir:outputs object) (cdr outputs))
+         (i 0 (1+ i)))
+        ((null outputs))
+      (push (make-edge (gethash object node-ids) (gethash (car outputs) node-ids)
+                       :classes (list "input")
+                       :label (cleavir-ir-graphviz:output-label object (car outputs) i))
+            elements))
+
+    (nconc elements (call-next-method))))
+
+
+(defmethod make-elements ((object cleavir-ir:enclose-instruction) node-ids parent-ids owner-ids)
+  (cons (make-edge (gethash (cleavir-ir:code object) node-ids) (gethash object node-ids)
+                   :classes (list "code"))
+        (call-next-method)))
+
+
+(defmethod make-elements ((object cleavir-ir:unwind-instruction) node-ids parent-ids owner-ids)
+  (cons (make-edge (gethash (cleavir-ir:destination object) node-ids) (gethash object node-ids)
+                   :classes (list "destination"))
+        (call-next-method)))
+
+
 (defun graph-form (graph form &key direct)
   (let* ((initial-instruction (make-hir form direct))
          (node-ids (make-hash-table :test #'eq))
@@ -287,13 +306,8 @@
                                                     (cons "state" 0)
                                                     (cons "label" "START"))
                                         :classes (list "start"))
-                         (make-instance 'cytoscape:element
-                                        :group "edges"
-                                        :data (list (cons "source" start-id)
-                                                    (cons "mask" 0)
-                                                    (cons "state" 0)
-                                                    (cons "target" (item-id initial-instruction node-ids)))
-                                        :classes (list "start")))))
+                         (make-edge start-id (item-id initial-instruction node-ids)
+                                    :classes (list "start")))))
 
 
     (cleavir-ir:map-instructions-with-owner
@@ -327,101 +341,17 @@
                    (setf (gethash datum owners) owner)))
                datum-blocks))
 
-    (maphash (lambda (object id &aux (data (list (cons "id" id)
-                                                 (cons "mask" 0)
-                                                 (cons "state" 0)
-                                                 (cons "label" (cleavir-ir-graphviz:label object))))
-                      (parent-id (gethash object owners))
-                      (classes (class-list object)))
-               (when parent-id
-                 (push (cons "parent" parent-id) data))
-               (when (gethash object parent-ids)
-                 (push "proxy" classes))
-               (push (make-instance 'cytoscape:element
-                                    :groups "nodes"
-                                    :data data
-                                    :classes classes)
-                     elements)
-
-               (when (typep object 'cleavir-ir:enclose-instruction)
-                 (push (make-instance 'cytoscape:element
-                                      :group "edges"
-                                      :data (list (cons "id" (jupyter:make-uuid))
-                                                  (cons "mask" 0)
-                                                  (cons "state" 0)
-                                                  (cons "source" (gethash (cleavir-ir:code object) node-ids))
-                                                  (cons "target" id))
-                                      :classes (list "code"))
-                       elements))
-
-               (when (typep object 'cleavir-ir:unwind-instruction)
-                 (push (make-instance 'cytoscape:element
-                                      :group "edges"
-                                      :data (list (cons "id" (jupyter:make-uuid))
-                                                  (cons "mask" 0)
-                                                  (cons "state" 0)
-                                                  (cons "source" (gethash (cleavir-ir:destination object) node-ids))
-                                                  (cons "target" id))
-                                      :classes (list "destination"))
-                       elements))
-
-               (when (typep object 'cleavir-ir:instruction)
-                 (do ((successors (cleavir-ir:successors object) (cdr successors))
-                      (i 0 (1+ i)))
-                     ((null successors))
-                   (push (make-instance 'cytoscape:element
-                                        :group "edges"
-                                        :data (list (cons "id" (jupyter:make-uuid))
-                                                    (cons "mask" 0)
-                                                    (cons "state" 0)
-                                                    (cons "source" id)
-                                                    (cons "target" (gethash (car successors) node-ids))
-                                                    (cons "label" (write-to-string i)))
-                                        :classes (list "successor"))
-                         elements))
-
-                 (do ((inputs (cleavir-ir:inputs object) (cdr inputs))
-                      (i 0 (1+ i)))
-                     ((null inputs))
-                   (push (make-instance 'cytoscape:element
-                                        :group "edges"
-                                        :data (list (cons "id" (jupyter:make-uuid))
-                                                    (cons "mask" 0)
-                                                    (cons "state" 0)
-                                                    (cons "source" (gethash (car inputs) node-ids))
-                                                    (cons "target" id)
-                                                    (cons "label" (cleavir-ir-graphviz:input-label object (car inputs) i)))
-                                        :classes (list "input"))
-                         elements))
-
-                 (do ((outputs (cleavir-ir:outputs object) (cdr outputs))
-                      (i 0 (1+ i)))
-                     ((null outputs))
-                   (push (make-instance 'cytoscape:element
-                                        :group "edges"
-                                        :data (list (cons "id" (jupyter:make-uuid))
-                                                    (cons "mask" 0)
-                                                    (cons "state" 0)
-                                                    (cons "source" id)
-                                                    (cons "target" (gethash (car outputs) node-ids))
-                                                    (cons "label" (cleavir-ir-graphviz:output-label object (car outputs) i)))
-                                        :classes (list "output"))
-                         elements))))
+    (maphash (lambda (object id)
+               (setq elements
+                     (nconc elements
+                            (make-elements object node-ids parent-ids owners))))
              node-ids)
 
-    (maphash (lambda (object id &aux (data (list (cons "id" id)
-                                                 (cons "mask" 0)
-                                                 (cons "state" 0)
-                                                 (cons "label" (cleavir-ir-graphviz:label object))))
-                      (parent-id (gethash object owners)))
-               (unless (or (null parent-id)
-                           (equal id parent-id))
-                 (push (cons "parent" parent-id) data))
-               (push (make-instance 'cytoscape:element
-                                    :groups "nodes"
-                                    :data data
-                                    :classes (cons "parent" (class-list object)))
-                     elements))
+    (maphash (lambda (object id)
+               (unless (gethash object node-ids)
+                 (setq elements
+                       (nconc elements
+                              (make-elements object node-ids parent-ids owners)))))
              parent-ids)
 
     (setq elements (generation-sort elements))
