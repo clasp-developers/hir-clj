@@ -72,6 +72,9 @@
      :accessor collapse-command
      :initform (make-instance 'cytoscape:menu-command
                               :content "<span class='fa fa-compress fa-2x'></span>"))
+   (visibility-state
+     :accessor visibility-state
+     :initform 0)
    (object-to-id
      :accessor object-to-id
      :initform (make-hash-table :test #'eq))
@@ -220,8 +223,20 @@
   (cdr (assoc "id" (cytoscape:data el) :test #'equal)))
 
 
+(defun index (el)
+  (cdr (assoc "index" (cytoscape:data el) :test #'equal)))
+
+
 (defun source (el)
   (cdr (assoc "source" (cytoscape:data el) :test #'equal)))
+
+
+(defun mask (el)
+  (cdr (assoc "mask" (cytoscape:data el) :test #'equal)))
+
+
+(defun state (el)
+  (cdr (assoc "state" (cytoscape:data el) :test #'equal)))
 
 
 (defun target (el)
@@ -268,11 +283,15 @@
          (elements (list (make-instance 'cytoscape:element
                                         :group "nodes"
                                         :data (list (cons "id" start-id)
+                                                    (cons "mask" 0)
+                                                    (cons "state" 0)
                                                     (cons "label" "START"))
                                         :classes (list "start"))
                          (make-instance 'cytoscape:element
                                         :group "edges"
                                         :data (list (cons "source" start-id)
+                                                    (cons "mask" 0)
+                                                    (cons "state" 0)
                                                     (cons "target" (item-id initial-instruction node-ids)))
                                         :classes (list "start")))))
 
@@ -309,6 +328,8 @@
                datum-blocks))
 
     (maphash (lambda (object id &aux (data (list (cons "id" id)
+                                                 (cons "mask" 0)
+                                                 (cons "state" 0)
                                                  (cons "label" (cleavir-ir-graphviz:label object))))
                       (parent-id (gethash object owners))
                       (classes (class-list object)))
@@ -326,6 +347,8 @@
                  (push (make-instance 'cytoscape:element
                                       :group "edges"
                                       :data (list (cons "id" (jupyter:make-uuid))
+                                                  (cons "mask" 0)
+                                                  (cons "state" 0)
                                                   (cons "source" (gethash (cleavir-ir:code object) node-ids))
                                                   (cons "target" id))
                                       :classes (list "code"))
@@ -335,6 +358,8 @@
                  (push (make-instance 'cytoscape:element
                                       :group "edges"
                                       :data (list (cons "id" (jupyter:make-uuid))
+                                                  (cons "mask" 0)
+                                                  (cons "state" 0)
                                                   (cons "source" (gethash (cleavir-ir:destination object) node-ids))
                                                   (cons "target" id))
                                       :classes (list "destination"))
@@ -347,6 +372,8 @@
                    (push (make-instance 'cytoscape:element
                                         :group "edges"
                                         :data (list (cons "id" (jupyter:make-uuid))
+                                                    (cons "mask" 0)
+                                                    (cons "state" 0)
                                                     (cons "source" id)
                                                     (cons "target" (gethash (car successors) node-ids))
                                                     (cons "label" (write-to-string i)))
@@ -359,6 +386,8 @@
                    (push (make-instance 'cytoscape:element
                                         :group "edges"
                                         :data (list (cons "id" (jupyter:make-uuid))
+                                                    (cons "mask" 0)
+                                                    (cons "state" 0)
                                                     (cons "source" (gethash (car inputs) node-ids))
                                                     (cons "target" id)
                                                     (cons "label" (cleavir-ir-graphviz:input-label object (car inputs) i)))
@@ -371,6 +400,8 @@
                    (push (make-instance 'cytoscape:element
                                         :group "edges"
                                         :data (list (cons "id" (jupyter:make-uuid))
+                                                    (cons "mask" 0)
+                                                    (cons "state" 0)
                                                     (cons "source" id)
                                                     (cons "target" (gethash (car outputs) node-ids))
                                                     (cons "label" (cleavir-ir-graphviz:output-label object (car outputs) i)))
@@ -379,6 +410,8 @@
              node-ids)
 
     (maphash (lambda (object id &aux (data (list (cons "id" id)
+                                                 (cons "mask" 0)
+                                                 (cons "state" 0)
                                                  (cons "label" (cleavir-ir-graphviz:label object))))
                       (parent-id (gethash object owners)))
                (unless (or (null parent-id)
@@ -394,13 +427,15 @@
     (setq elements (generation-sort elements))
 
 
-    (dolist (parent (nreverse (mapcan (lambda (element)
+    (do* ((parents (nreverse (mapcan (lambda (element)
                                         (when (member "parent" (cytoscape:classes element) :test #'equal)
                                           (list element)))
-                                      elements)))
+                                      elements))
+                                      (cdr parents))
+         (parent (car parents) (car parents))
+         (pos 0 (1+ pos)))
+         ((null parents))
       (let* ((parent-id (id parent))
-             (parent-expand-class (format nil "~A-e" parent-id)); (jupyter:make-uuid))
-             (parent-collapse-class (format nil "~A-c" parent-id)) ;(jupyter:make-uuid))
              (children (mapcan (lambda (element)
                                  (when (equal (parent element) parent-id)
                                    (list element)))
@@ -408,11 +443,12 @@
              (children-ids (mapcar #'id children))
              new-edges)
         (setf (cytoscape:data parent) (nconc (cytoscape:data parent)
-                                             (list (cons "expand" parent-expand-class)
-                                                   (cons "collapse" parent-collapse-class))))
+                                             (list (cons "index" pos))))
         (dolist (child children)
-          (setf (cytoscape:classes child)
-                (cons parent-expand-class (cytoscape:classes child)))
+          (let ((pair (assoc "mask" (cytoscape:data child) :test #'equal)))
+            (rplacd pair (logior (cdr pair) (ash 1 pos))))
+          (let ((pair (assoc "state" (cytoscape:data child) :test #'equal)))
+            (rplacd pair (logior (cdr pair) (ash 1 pos))))
           (setf (cytoscape:removed child) t))
         (dolist (element elements)
           (when (equal "edges" (cytoscape:group element))
@@ -426,8 +462,10 @@
                                          :removed (cytoscape:removed element)
                                          :data (list (cons "id" (jupyter:make-uuid))
                                                      (cons "source" parent-id)
-                                                     (cons "target" (target element)))
-                                         :classes (append (list parent-collapse-class) (cytoscape:classes element)))
+                                                     (cons "target" (target element))
+                                                     (cons "mask" (logior (mask element) (ash 1 pos)))
+                                                     (cons "state" (state element)))
+                                         :classes (cytoscape:classes element))
                           new-edges))
                   ((and (not source-child-p) target-child-p)
                     (push (make-instance 'cytoscape:element
@@ -435,11 +473,15 @@
                                          :removed (cytoscape:removed element)
                                          :data (list (cons "id" (jupyter:make-uuid))
                                                      (cons "source" (source element))
-                                                     (cons "target" parent-id))
-                                         :classes (append (list parent-collapse-class) (cytoscape:classes element)))
+                                                     (cons "target" parent-id)
+                                                     (cons "mask" (logior (mask element) (ash 1 pos)))
+                                                     (cons "state" (state element)))
+                                         :classes (cytoscape:classes element))
                           new-edges)))
-                (setf (cytoscape:classes element)
-                      (cons parent-expand-class (cytoscape:classes element)))
+                (let ((pair (assoc "mask" (cytoscape:data element) :test #'equal)))
+                  (rplacd pair (logior (cdr pair) (ash 1 pos))))
+                (let ((pair (assoc "state" (cytoscape:data element) :test #'equal)))
+                  (rplacd pair (logior (cdr pair) (ash 1 pos))))
                 (setf (cytoscape:removed element) t)))))
         (setq elements (nconc elements new-edges))))
 
@@ -468,31 +510,21 @@
 (defun expand-node (graph node)
   (when (stringp node)
     (setq node (find node (cytoscape:elements (cytoscape graph)) :key #'id :test #'equal)))
-  (let ((expand-class (cdr (assoc "expand" (cytoscape:data node) :test #'equal)))
-        (collapse-class (cdr (assoc "collapse" (cytoscape:data node) :test #'equal))))
-    (when collapse-class
-      (dolist (element (reverse (cytoscape:elements (cytoscape graph))))
-        (when (member collapse-class (cytoscape:classes element) :test #'equal)
-          (setf (cytoscape:removed element) t))))
-    (when expand-class
-      (dolist (element (cytoscape:elements (cytoscape graph)))
-        (when (member expand-class (cytoscape:classes element) :test #'equal)
-          (setf (cytoscape:removed element) nil)))))
+  (setf (visibility-state graph) (logior (visibility-state graph) (ash 1 (index node))))
+  (jupyter:inform :info nil "~A" (visibility-state graph))
+  (dolist (element (cytoscape:elements (cytoscape graph)))
+    (setf (cytoscape:removed element)
+          (not (equal (logand (mask element) (visibility-state graph)) (state element)))))
   (cytoscape:layout (cytoscape graph)))
 
 
 (defun collapse-node (graph node)
   (when (stringp node)
     (setq node (find node (cytoscape:elements (cytoscape graph)) :key #'id :test #'equal)))
-  (let ((expand-class (cdr (assoc "expand" (cytoscape:data node) :test #'equal)))
-        (collapse-class (cdr (assoc "collapse" (cytoscape:data node) :test #'equal))))
-    (when expand-class
-      (dolist (element (reverse (cytoscape:elements (cytoscape graph))))
-        (when (member expand-class (cytoscape:classes element) :test #'equal)
-          (setf (cytoscape:removed element) t))))
-    (when collapse-class
-      (dolist (element (cytoscape:elements (cytoscape graph)))
-        (when (member collapse-class (cytoscape:classes element) :test #'equal)
-          (setf (cytoscape:removed element) nil)))))
+  (setf (visibility-state graph) (logand (visibility-state graph) (lognot (ash 1 (index node)))))
+  (jupyter:inform :info nil "~A" (visibility-state graph))
+  (dolist (element (cytoscape:elements (cytoscape graph)))
+    (setf (cytoscape:removed element)
+          (not (equal (logand (mask element) (visibility-state graph)) (state element)))))
   (cytoscape:layout (cytoscape graph)))
 
