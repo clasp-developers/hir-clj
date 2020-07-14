@@ -33,14 +33,8 @@
   (cleavir-ir:form object))
 
 
-(defclass hir-graph ()
-  ((cytoscape
-     :accessor cytoscape
-     :initform (make-instance 'cytoscape:cytoscape-widget
-                               :graph-layouts (list (make-instance 'cytoscape:dagre-layout :align "L"))
-                               :graph-style *default-graph-style*
-                               :layout (make-instance 'jupyter-widgets:layout :height "800px")))
-   (expand-command
+(defclass hir-graph (cytoscape:cytoscape-widget)
+  ((expand-command
      :accessor expand-command
      :initform (make-instance 'cytoscape:menu-command
                               :content "<span class='fa fa-expand fa-2x'></span>"))
@@ -50,11 +44,15 @@
                               :content "<span class='fa fa-compress fa-2x'></span>"))
    (visibility-state
      :accessor visibility-state
-     :initform 0)))
+     :initform 0))
+  (:default-initargs
+    :graph-layouts (list (make-instance 'cytoscape:dagre-layout))
+    :graph-style *default-graph-style*
+    :layout (make-instance 'jupyter-widgets:layout :height "800px"))
 
 
 (defun set-graph-style (graph name)
-  (setf (cytoscape:graph-style (cytoscape graph)) (load-graph-style name)))
+  (setf (cytoscape:graph-style graph) (load-graph-style name)))
 
 
 (defun make-hir (form &optional direct)
@@ -381,8 +379,8 @@
 
     (index-graph initial-instruction node-ids container-ids parent-ids)
 
-    (setf (cytoscape:elements (cytoscape graph))
-          (nconc (cytoscape:elements (cytoscape graph))
+    (setf (cytoscape:elements graph)
+          (nconc (cytoscape:elements graph)
                  (make-shadow-graph (generation-sort (make-graph initial-instruction node-ids container-ids parent-ids)))))))
 
 
@@ -395,28 +393,29 @@
                                     (lambda (command-instance id)
                                       (declare (ignore command-instance))
                                       (collapse-nodes graph id)))
-  (setf (cytoscape:context-menus (cytoscape graph))
+  (setf (cytoscape:context-menus graph)
         (list (make-instance 'cytoscape:context-menu
                              :selector "node"
                              :commands (list (expand-command graph) (collapse-command graph)))))
   (let ((form (getf initargs :form)))
     (when form
-      (graph-form graph form))))
+      (graph-form graph form)))
+  graph)
 
 
 (defun update-visibility (graph)
   "Set the removed trait of each element according to the current visibility state"
-  (dolist (element (cytoscape:elements (cytoscape graph)))
+  (dolist (element (cytoscape:elements graph))
     (setf (cytoscape:removed element)
           (not (equal (logand (mask element) (visibility-state graph)) (state element)))))
-  (cytoscape:layout (cytoscape graph)))
+  (cytoscape:layout graph))
 
 
 (defun expand-nodes (graph &rest nodes)
   "Expand nodes if possible"
   (dolist (node nodes)
     (when (stringp node)
-      (setq node (find node (cytoscape:elements (cytoscape graph)) :key #'id :test #'equal)))
+      (setq node (find node (cytoscape:elements graph) :key #'id :test #'equal)))
     (setf (visibility-state graph) (logior (visibility-state graph) (ash 1 (index node)))))
   (update-visibility graph))
 
@@ -425,7 +424,11 @@
   "Collapse nodes if possible"
   (dolist (node nodes)
     (when (stringp node)
-      (setq node (find node (cytoscape:elements (cytoscape graph)) :key #'id :test #'equal)))
+      (setq node (find node (cytoscape:elements graph) :key #'id :test #'equal)))
     (setf (visibility-state graph) (logand (visibility-state graph) (lognot (ash 1 (index node))))))
   (update-visibility graph))
 
+
+(defun make-hir-graph (form &key direct)
+  (make-instance 'hir-graph :form form :direct direct))
+  
