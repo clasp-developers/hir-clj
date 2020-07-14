@@ -45,10 +45,11 @@
    (visibility-state
      :accessor visibility-state
      :initform 0))
+  (:metaclass jupyter-widgets:trait-metaclass)
   (:default-initargs
     :graph-layouts (list (make-instance 'cytoscape:dagre-layout))
     :graph-style *default-graph-style*
-    :layout (make-instance 'jupyter-widgets:layout :height "800px"))
+    :layout (make-instance 'jupyter-widgets:layout :height "800px")))
 
 
 (defun set-graph-style (graph name)
@@ -397,9 +398,6 @@
         (list (make-instance 'cytoscape:context-menu
                              :selector "node"
                              :commands (list (expand-command graph) (collapse-command graph)))))
-  (let ((form (getf initargs :form)))
-    (when form
-      (graph-form graph form)))
   graph)
 
 
@@ -430,5 +428,8 @@
 
 
 (defun make-hir-graph (form &key direct)
-  (make-instance 'hir-graph :form form :direct direct))
+  (let ((graph (make-instance 'hir-graph)))
+    (graph-form graph form :direct direct)
+    graph))
+
   
